@@ -1,11 +1,12 @@
 import asyncio
+import os
 import uuid
 
 import streamlit as st
 from dotenv import load_dotenv
 from openai.types.responses import ResponseTextDeltaEvent
 
-from agents import Agent, Runner, SQLiteSession, WebSearchTool
+from agents import Agent, FileSearchTool, Runner, SQLiteSession, WebSearchTool
 
 load_dotenv()
 
@@ -14,10 +15,17 @@ INSTRUCTIONS = """\
 당신은 따뜻하고 진심 어린 라이프 코치입니다.
 사용자의 목표와 고민을 존중하며, 격려하는 톤으로 대화하세요.
 
+사용 가능한 도구:
+- file_search: 사용자의 개인 목표/운동 루틴/훈련 일지가 담긴 문서를 검색합니다.
+  사용자의 현재 상태·목표·진행 상황과 관련된 질문이면 이 도구를 먼저 쓰세요.
+- web_search: 동기부여, 자기개발, 습관 형성, 생산성에 대한 최신 정보를 웹에서 찾습니다.
+
 원칙:
-- 동기부여, 자기개발, 습관 형성, 생산성, 마인드셋과 관련된 질문을 받으면
-  반드시 web_search 도구로 최신·검증된 정보를 먼저 찾아보세요.
-- 검색 결과를 그대로 나열하지 말고, 사용자의 상황에 맞춰 핵심을 정리해 주세요.
+- 개인 목표·진행 상황 질문 → 먼저 file_search로 기록을 참조.
+- 일반적인 팁/방법론 질문 → web_search 활용.
+- 가능하면 두 결과를 결합해 "당신의 목표(file_search)에 맞는 방법(web_search)"을
+  구체적으로 제안하세요.
+- 검색 결과를 그대로 나열하지 말고, 사용자 상황에 맞춰 정리해 답하세요.
 - 답변은 한국어로, 따뜻하고 구체적으로. 실행 가능한 1~3개의 다음 행동을 함께 제안하세요.
 - 이전 대화 내용을 기억하고 일관되게 사용자를 응원하세요.
 """
@@ -25,11 +33,15 @@ INSTRUCTIONS = """\
 
 @st.cache_resource
 def get_agent() -> Agent:
+    tools: list = [WebSearchTool()]
+    vs_id = os.getenv("OPENAI_VECTOR_STORE_ID")
+    if vs_id:
+        tools.append(FileSearchTool(vector_store_ids=[vs_id], max_num_results=5))
     return Agent(
         name="Life Coach",
         instructions=INSTRUCTIONS,
         model="gpt-4o-mini",
-        tools=[WebSearchTool()],
+        tools=tools,
     )
 
 
@@ -62,18 +74,29 @@ async def stream_reply(user_input: str, text_box, status_box) -> str:
         if event.type == "run_item_stream_event":
             item = event.item
             if item.type == "tool_call_item":
-                # WebSearchTool call → show "검색 중" hint.
                 raw = getattr(item, "raw_item", None)
-                query = None
-                if raw is not None:
-                    # Try common shapes for the search query.
-                    query = getattr(raw, "query", None)
-                    if query is None:
-                        action = getattr(raw, "action", None)
-                        if action is not None:
-                            query = getattr(action, "query", None)
-                label = f"🔎 웹 검색 중: {query}" if query else "🔎 웹 검색 중..."
-                status_box.caption(label)
+                raw_type = getattr(raw, "type", "") if raw is not None else ""
+
+                if "file_search" in raw_type:
+                    # Responses API: FileSearchTool call.
+                    queries = getattr(raw, "queries", None)
+                    label = (
+                        f"📂 목표 문서 검색 중: {', '.join(queries)}"
+                        if queries
+                        else "📂 목표 문서 검색 중..."
+                    )
+                    status_box.caption(label)
+                else:
+                    # Default: WebSearchTool or unknown tool.
+                    query = None
+                    if raw is not None:
+                        query = getattr(raw, "query", None)
+                        if query is None:
+                            action = getattr(raw, "action", None)
+                            if action is not None:
+                                query = getattr(action, "query", None)
+                    label = f"🔎 웹 검색 중: {query}" if query else "🔎 웹 검색 중..."
+                    status_box.caption(label)
             elif item.type == "tool_call_output_item":
                 status_box.caption("✅ 검색 결과 수신, 답변 정리 중...")
 
@@ -104,6 +127,18 @@ def main() -> None:
             st.session_state.messages = []
             st.session_state.pop("session_id", None)
             st.rerun()
+
+        st.divider()
+        st.subheader("연결된 도구")
+        st.markdown("- 🔎 Web Search")
+        vs_id = os.getenv("OPENAI_VECTOR_STORE_ID")
+        if vs_id:
+            st.markdown(f"- 📂 File Search\n\n  `{vs_id}`")
+        else:
+            st.warning(
+                "File Search 비활성: `OPENAI_VECTOR_STORE_ID`가 .env에 없습니다. "
+                "`uv run python setup_vector_store.py`로 생성하세요."
+            )
 
     render_history()
 
