@@ -10,12 +10,12 @@ from openai.types.responses import ResponseTextDeltaEvent
 from agents import (
     Agent,
     FileSearchTool,
-    ImageGenerationTool,
     Runner,
     SQLiteSession,
     WebSearchTool,
+    function_tool,
 )
-from agents.tool import ImageGeneration
+from openai import OpenAI
 
 load_dotenv()
 
@@ -28,7 +28,7 @@ INSTRUCTIONS = """\
 - file_search: 사용자의 개인 목표/운동 루틴/훈련 일지가 담긴 문서를 검색합니다.
   사용자의 현재 상태·목표·진행 상황과 관련된 질문이면 이 도구를 먼저 쓰세요.
 - web_search: 동기부여, 자기개발, 습관 형성, 생산성에 대한 최신 정보를 웹에서 찾습니다.
-- image_generation: 비전 보드, 동기부여 포스터, 축하 이미지 등을 생성합니다.
+- generate_image: 비전 보드, 동기부여 포스터, 축하 이미지 등을 생성합니다.
 
 원칙:
 - 개인 목표·진행 상황 질문 → 먼저 file_search로 기록을 참조.
@@ -40,26 +40,40 @@ INSTRUCTIONS = """\
 - 이전 대화 내용을 기억하고 일관되게 사용자를 응원하세요.
 
 이미지 생성 원칙:
-- 사용자가 비전 보드, 동기부여 이미지, 축하 이미지를 요청하면 image_generation을 사용하세요.
+- 사용자가 비전 보드, 동기부여 이미지, 축하 이미지를 요청하면 generate_image를 사용하세요.
 - 목표 달성 축하, 진행 상황 시각화, 새해/새달 비전 보드 등에 적극 활용하세요.
 - 이미지 생성 전에 file_search로 사용자의 목표를 먼저 확인하면 더 개인화된 이미지를 만들 수 있습니다.
 - 프롬프트는 영어로 작성하되, 이미지 내 텍스트가 필요하면 한국어를 포함하세요.
+- generate_image 도구를 호출할 때 prompt 인자에 영어로 된 상세한 이미지 설명을 넣으세요.
 """
+
+
+_pending_images: list[bytes] = []
+
+
+@function_tool
+def generate_image(prompt: str) -> str:
+    """Generate a motivational image, vision board, or celebration poster.
+
+    Args:
+        prompt: A detailed English description of the image to generate.
+    """
+    client = OpenAI()
+    response = client.images.generate(
+        model="dall-e-3",
+        prompt=prompt,
+        size="1024x1024",
+        n=1,
+        response_format="b64_json",
+    )
+    img_bytes = base64.b64decode(response.data[0].b64_json)
+    _pending_images.append(img_bytes)
+    return "Image generated successfully. It will be displayed in the chat."
 
 
 @st.cache_resource
 def get_agent() -> Agent:
-    tools: list = [
-        WebSearchTool(),
-        ImageGenerationTool(
-            tool_config=ImageGeneration(
-                type="image_generation",
-                model="gpt-image-1",
-                quality="medium",
-                size="1024x1024",
-            )
-        ),
-    ]
+    tools: list = [WebSearchTool(), generate_image]
     vs_id = os.getenv("OPENAI_VECTOR_STORE_ID")
     if vs_id:
         tools.append(FileSearchTool(vector_store_ids=[vs_id], max_num_results=5))
@@ -78,7 +92,7 @@ def get_session() -> SQLiteSession:
 
 
 async def stream_reply(
-    user_input: str, text_box, status_box, image_box
+    user_input: str, text_box, status_box
 ) -> tuple[str, list[bytes]]:
     """Run the agent with streaming and incrementally update the UI.
 
@@ -88,8 +102,8 @@ async def stream_reply(
     session = get_session()
     result = Runner.run_streamed(agent, user_input, session=session)
 
+    _pending_images.clear()
     text_buffer = ""
-    images: list[bytes] = []
     async for event in result.stream_events():
         # Token-by-token deltas from the model.
         if event.type == "raw_response_event" and isinstance(
@@ -106,14 +120,10 @@ async def stream_reply(
                 raw = getattr(item, "raw_item", None)
                 raw_type = getattr(raw, "type", "") if raw is not None else ""
 
-                if "image_generation" in raw_type:
-                    status_box.caption("🎨 이미지 생성 중...")
-                    b64 = getattr(raw, "result", None)
-                    if b64:
-                        img_bytes = base64.b64decode(b64)
-                        images.append(img_bytes)
-                        image_box.image(img_bytes)
-                        status_box.caption("🎨 이미지 생성 완료!")
+                if raw_type == "function_call":
+                    fn_name = getattr(raw, "name", "")
+                    if fn_name == "generate_image":
+                        status_box.caption("🎨 이미지 생성 중...")
                 elif "file_search" in raw_type:
                     queries = getattr(raw, "queries", None)
                     label = (
@@ -133,18 +143,13 @@ async def stream_reply(
                     label = f"🔎 웹 검색 중: {query}" if query else "🔎 웹 검색 중..."
                     status_box.caption(label)
             elif item.type == "tool_call_output_item":
-                raw = getattr(item, "raw_item", None)
-                raw_type = getattr(raw, "type", "") if raw is not None else ""
-                if "image_generation" in raw_type:
-                    b64 = getattr(raw, "result", None)
-                    if b64 and not images:
-                        img_bytes = base64.b64decode(b64)
-                        images.append(img_bytes)
-                        image_box.image(img_bytes)
-                        status_box.caption("🎨 이미지 생성 완료!")
+                if _pending_images:
+                    status_box.caption("🎨 이미지 생성 완료!")
                 else:
                     status_box.caption("✅ 검색 결과 수신, 답변 정리 중...")
 
+    images = list(_pending_images)
+    _pending_images.clear()
     return text_buffer, images
 
 
@@ -201,10 +206,10 @@ def main() -> None:
     with st.chat_message("assistant"):
         status_box = st.empty()
         text_box = st.empty()
-        image_box = st.empty()
+        image_container = st.container()
         try:
             final_text, images = asyncio.run(
-                stream_reply(user_input, text_box, status_box, image_box)
+                stream_reply(user_input, text_box, status_box)
             )
         except Exception as e:  # noqa: BLE001
             final_text = f"⚠️ 오류가 발생했어요: {e}"
@@ -212,6 +217,9 @@ def main() -> None:
             text_box.markdown(final_text)
         finally:
             status_box.empty()
+
+        for img in images:
+            image_container.image(img)
 
     st.session_state.messages.append(
         {"role": "assistant", "content": final_text, "images": images}
