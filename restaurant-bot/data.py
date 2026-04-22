@@ -112,3 +112,6 @@ RESERVATION_SLOTS: dict[str, dict[str, int]] = {
 # 런타임 저장소 (세션 단위가 아니라 프로세스 단위 — 데모용).
 PLACED_ORDERS: list[dict] = []
 RESERVATIONS: list[dict] = []
+COMPLAINTS: list[dict] = []
+DISCOUNT_VOUCHERS: list[dict] = []
+MANAGER_CALLBACKS: list[dict] = []

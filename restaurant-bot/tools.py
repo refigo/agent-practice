@@ -7,6 +7,9 @@ import uuid
 from agents import function_tool
 
 from data import (
+    COMPLAINTS,
+    DISCOUNT_VOUCHERS,
+    MANAGER_CALLBACKS,
     MENU,
     PLACED_ORDERS,
     RESERVATION_SLOTS,
@@ -164,4 +167,75 @@ def make_reservation(
         f"예약자: {name}\n"
         f"일시: {date} {time}\n"
         f"인원: {party_size}명"
+    )
+
+
+# ----------------------------- Complaint tools -----------------------------
+
+
+@function_tool
+def log_complaint(summary: str, severity: str) -> str:
+    """Record a customer complaint for internal follow-up.
+
+    Args:
+        summary: Short description of the customer's complaint.
+        severity: One of "low", "medium", "high". Use "high" for health/safety
+            issues, foreign objects in food, or staff misconduct.
+    """
+    severity = severity.lower()
+    if severity not in {"low", "medium", "high"}:
+        severity = "medium"
+    ticket_id = uuid.uuid4().hex[:6].upper()
+    COMPLAINTS.append(
+        {"ticket_id": ticket_id, "summary": summary, "severity": severity}
+    )
+    escalated = severity == "high"
+    msg = f"불만 접수 번호: {ticket_id} (심각도: {severity})"
+    if escalated:
+        msg += "\n※ 심각도 '상' — 매니저에게 즉시 에스컬레이션되었습니다."
+    return msg
+
+
+@function_tool
+def offer_discount(percent: int, reason: str) -> str:
+    """Issue a one-time discount voucher for a customer's next visit.
+
+    Args:
+        percent: Discount percentage (5–50).
+        reason: Short reason tied to the complaint (for internal audit).
+    """
+    percent = max(5, min(50, int(percent)))
+    voucher_code = "DISC-" + uuid.uuid4().hex[:6].upper()
+    DISCOUNT_VOUCHERS.append(
+        {"voucher_code": voucher_code, "percent": percent, "reason": reason}
+    )
+    return (
+        f"쿠폰 발급 완료\n"
+        f"쿠폰 코드: {voucher_code}\n"
+        f"할인율: 다음 방문 시 {percent}% 할인"
+    )
+
+
+@function_tool
+def schedule_manager_callback(name: str, contact: str, issue: str) -> str:
+    """Schedule a callback from the duty manager for a dissatisfied customer.
+
+    Args:
+        name: Customer name.
+        contact: Phone or email to reach the customer.
+        issue: Summary of the issue the manager should be briefed on.
+    """
+    callback_id = uuid.uuid4().hex[:6].upper()
+    MANAGER_CALLBACKS.append(
+        {
+            "callback_id": callback_id,
+            "name": name,
+            "contact": contact,
+            "issue": issue,
+        }
+    )
+    return (
+        f"매니저 콜백 예약 완료\n"
+        f"접수 번호: {callback_id}\n"
+        f"담당 매니저가 영업 시간 내 {contact} 로 직접 연락드릴 예정입니다."
     )
