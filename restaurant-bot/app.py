@@ -1,5 +1,7 @@
 import asyncio
+import os
 import uuid
+from pathlib import Path
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -32,6 +34,19 @@ from tools import (
 )
 
 load_dotenv()
+
+# Streamlit Cloud injects secrets via st.secrets, not a .env file. Fall back to
+# st.secrets if OPENAI_API_KEY is not already set in the environment. Wrap in
+# try/except so local runs without a secrets.toml don't crash.
+if not os.environ.get("OPENAI_API_KEY"):
+    try:
+        api_key = st.secrets.get("OPENAI_API_KEY")
+    except Exception:
+        api_key = None
+    if api_key:
+        os.environ["OPENAI_API_KEY"] = api_key
+
+DB_PATH = str(Path(__file__).parent / "restaurant_bot.db")
 
 
 # ----------------------------- Agent definitions -----------------------------
@@ -317,7 +332,7 @@ def agent_label(name: str) -> str:
 def get_session() -> SQLiteSession:
     if "session_id" not in st.session_state:
         st.session_state.session_id = f"restaurant-{uuid.uuid4().hex[:8]}"
-    return SQLiteSession(st.session_state.session_id, "restaurant_bot.db")
+    return SQLiteSession(st.session_state.session_id, DB_PATH)
 
 
 # ----------------------------- Streaming -----------------------------
