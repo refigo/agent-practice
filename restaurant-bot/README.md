@@ -41,6 +41,22 @@ echo 'OPENAI_API_KEY=sk-...' > .env
 uv run streamlit run app.py
 ```
 
+## Streamlit Cloud 배포
+
+1. 이 리포지토리를 GitHub에 푸시.
+2. [share.streamlit.io](https://share.streamlit.io/) → **New app**.
+3. Repository: `refigo/agent-practice`, Branch: `main`,
+   Main file path: `restaurant-bot/app.py`.
+4. **Advanced settings → Secrets** 에 다음을 붙여넣기:
+   ```toml
+   OPENAI_API_KEY = "sk-..."
+   ```
+   (파일 형식 예시는 `restaurant-bot/.streamlit/secrets.toml.example` 참고)
+5. **Deploy** 후 공개 URL 확인.
+
+의존성은 `restaurant-bot/requirements.txt` 에 정의되어 있고, `OPENAI_API_KEY`
+는 환경 변수가 비어 있으면 `st.secrets` 에서 자동으로 폴백합니다.
+
 ## 예시 흐름
 
 ```
