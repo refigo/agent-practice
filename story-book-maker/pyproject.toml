@@ -1,0 +1,9 @@
+[project]
+name = "story-book-maker"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.11"
+dependencies = [
+    "google-adk>=1.31.1",
+    "python-dotenv>=1.2.2",
+]
