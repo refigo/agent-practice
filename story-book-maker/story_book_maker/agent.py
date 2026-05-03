@@ -10,10 +10,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+from typing import AsyncGenerator
+
 from dotenv import load_dotenv
 from google import genai
-from google.adk.agents import LlmAgent, ParallelAgent, SequentialAgent
+from google.adk.agents import BaseAgent, LlmAgent, ParallelAgent, SequentialAgent
 from google.adk.agents.callback_context import CallbackContext
+from google.adk.agents.invocation_context import InvocationContext
+from google.adk.events import Event
 from google.adk.tools import ToolContext
 from google.genai import types
 from pydantic import BaseModel, Field
@@ -143,6 +147,48 @@ parallel_illustrator = ParallelAgent(
 )
 
 
+# ---------- Finalizer (assembles the completed storybook view) ----------
+
+class StorybookFinalizer(BaseAgent):
+    """Reads state['story'] and emits one combined page-by-page text block.
+
+    Pairs with the artifacts saved by the parallel illustrators so the chat
+    output presents a complete storybook (text) alongside the Artifacts tab (images).
+    """
+
+    async def _run_async_impl(
+        self, ctx: InvocationContext
+    ) -> AsyncGenerator[Event, None]:
+        story = ctx.session.state.get("story") or {}
+        title = story.get("title", "(제목 없음)")
+        pages = story.get("pages", [])
+
+        lines: list[str] = [f"# 📖 {title}", ""]
+        for p in pages:
+            n = p.get("page")
+            lines.append(f"## Page {n}")
+            lines.append(f"**Text:** {p.get('text', '')}")
+            lines.append(f"**Visual:** {p.get('visual', '')}")
+            lines.append(f"**Image:** `page_{n}.png` (Artifacts 탭 참고)")
+            lines.append("")
+        lines.append("🎉 동화책이 완성되었습니다!")
+
+        text = "\n".join(lines)
+        print(text, flush=True)
+
+        yield Event(
+            author=self.name,
+            invocationId=ctx.invocation_id,
+            content=types.Content(role="model", parts=[types.Part(text=text)]),
+        )
+
+
+finalizer = StorybookFinalizer(
+    name="finalizer",
+    description="Assembles the final storybook view (text + image references).",
+)
+
+
 # ---------- Root ----------
 
 def _root_after(callback_context: CallbackContext) -> Optional[types.Content]:
@@ -152,7 +198,10 @@ def _root_after(callback_context: CallbackContext) -> Optional[types.Content]:
 
 root_agent = SequentialAgent(
     name="story_book_maker",
-    description="Two-step pipeline: write a 5-page children's story, then illustrate each page in parallel.",
-    sub_agents=[story_writer, parallel_illustrator],
+    description=(
+        "Three-step pipeline: write a 5-page children's story, illustrate each "
+        "page in parallel, then assemble the final storybook view."
+    ),
+    sub_agents=[story_writer, parallel_illustrator, finalizer],
     after_agent_callback=_root_after,
 )
