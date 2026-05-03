@@ -1,15 +1,19 @@
-"""Story Book Maker — Google ADK pipeline (Gemini + native image gen).
+"""Story Book Maker — Google ADK pipeline (Sequential + Parallel + Callbacks).
 
-StoryWriter writes a 5-page children's story to state["story"];
-Illustrator reads it back and saves one PNG per page as an Artifact.
+Pipeline:
+    SequentialAgent
+      ├─ story_writer        (LlmAgent, output_schema=StoryBook → state["story"])
+      └─ parallel_illustrator (ParallelAgent of 5 page-bound illustrators)
 """
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
 from google import genai
-from google.adk.agents import LlmAgent, SequentialAgent
+from google.adk.agents import LlmAgent, ParallelAgent, SequentialAgent
+from google.adk.agents.callback_context import CallbackContext
 from google.adk.tools import ToolContext
 from google.genai import types
 from pydantic import BaseModel, Field
@@ -18,6 +22,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 TEXT_MODEL = "gemini-2.5-flash"
 IMAGE_MODEL = "gemini-2.5-flash-image"
+PAGE_COUNT = 5
 
 
 class StoryPage(BaseModel):
@@ -33,7 +38,23 @@ class StoryPage(BaseModel):
 class StoryBook(BaseModel):
     title: str = Field(description="Story title in Korean")
     theme: str = Field(description="Echo of the theme the user requested")
-    pages: list[StoryPage] = Field(description="Exactly 5 pages, in order")
+    pages: list[StoryPage] = Field(description=f"Exactly {PAGE_COUNT} pages, in order")
+
+
+# ---------- Story Writer ----------
+
+def _writer_before(callback_context: CallbackContext) -> Optional[types.Content]:
+    print("📝 스토리 작성 중...", flush=True)
+    return None
+
+
+def _writer_after(callback_context: CallbackContext) -> Optional[types.Content]:
+    story = callback_context.state.get("story")
+    if isinstance(story, dict):
+        title = story.get("title", "(제목 없음)")
+        pages = len(story.get("pages", []))
+        print(f"✅ 스토리 완성: 「{title}」 ({pages}페이지)", flush=True)
+    return None
 
 
 story_writer = LlmAgent(
@@ -41,32 +62,33 @@ story_writer = LlmAgent(
     model=TEXT_MODEL,
     description="Writes a 5-page children's story for a given theme.",
     instruction=(
-        "You are a children's book author. The user provides a theme. "
-        "Write a warm, simple 5-page story — 1 to 2 short Korean sentences per page. "
+        f"You are a children's book author. The user provides a theme. "
+        f"Write a warm, simple {PAGE_COUNT}-page story — 1 to 2 short Korean sentences per page. "
         "For each page also write a concise English visual description that an "
         "illustrator can draw. Return strictly the StoryBook schema, no extra prose."
     ),
     output_schema=StoryBook,
     output_key="story",
+    before_agent_callback=_writer_before,
+    after_agent_callback=_writer_after,
 )
 
 
-async def generate_illustrations(tool_context: ToolContext) -> dict:
-    """Read state['story'] and save one image per page as page_<n>.png."""
-    story = tool_context.state.get("story")
-    if not story:
-        return {"status": "error", "message": "No story found in state."}
+# ---------- Page-bound Illustrators ----------
 
-    pages = story.get("pages", [])
-    client = genai.Client()
-    saved: list[dict] = []
+def _make_page_illustrator(page_num: int) -> LlmAgent:
+    async def generate_page_image(tool_context: ToolContext) -> dict:
+        story = tool_context.state.get("story") or {}
+        pages = story.get("pages", [])
+        if page_num > len(pages):
+            return {"status": "error", "page": page_num, "message": "page not in state"}
 
-    for page in pages:
-        n = page["page"]
+        page = pages[page_num - 1]
         prompt = (
             "Children's storybook illustration, soft watercolor style, whimsical and friendly. "
             f"{page['visual']}. No text in image."
         )
+        client = genai.Client()
         response = client.models.generate_content(
             model=IMAGE_MODEL,
             contents=prompt,
@@ -80,32 +102,57 @@ async def generate_illustrations(tool_context: ToolContext) -> dict:
                 img_bytes = part.inline_data.data
                 break
         if not img_bytes:
-            return {"status": "error", "page": n, "message": "No image bytes returned"}
+            return {"status": "error", "page": page_num, "message": "no image bytes"}
 
         artifact = types.Part.from_bytes(data=img_bytes, mime_type="image/png")
-        artifact_name = f"page_{n}.png"
+        artifact_name = f"page_{page_num}.png"
         await tool_context.save_artifact(artifact_name, artifact)
-        saved.append({"page": n, "artifact": artifact_name})
+        return {"status": "ok", "page": page_num, "artifact": artifact_name}
 
-    return {"status": "ok", "count": len(saved), "saved": saved}
+    generate_page_image.__name__ = f"generate_page_{page_num}_image"
+    generate_page_image.__doc__ = (
+        f"Generate page {page_num}'s illustration from state['story'] and save it as page_{page_num}.png."
+    )
+
+    def _before(callback_context: CallbackContext) -> Optional[types.Content]:
+        print(f"🎨 이미지 {page_num}/{PAGE_COUNT} 생성 중...", flush=True)
+        return None
+
+    def _after(callback_context: CallbackContext) -> Optional[types.Content]:
+        print(f"✅ 이미지 {page_num}/{PAGE_COUNT} 완료", flush=True)
+        return None
+
+    return LlmAgent(
+        name=f"page_{page_num}_illustrator",
+        model=TEXT_MODEL,
+        description=f"Generates the illustration for page {page_num}.",
+        instruction=(
+            f"Call `generate_page_{page_num}_image` exactly once. "
+            "When it returns, reply with a single short Korean sentence confirming the artifact was saved."
+        ),
+        tools=[generate_page_image],
+        before_agent_callback=_before,
+        after_agent_callback=_after,
+    )
 
 
-illustrator = LlmAgent(
-    name="illustrator",
-    model=TEXT_MODEL,
-    description="Generates illustrations for the story pages saved in state.",
-    instruction=(
-        "A 5-page story is already written and stored in state['story']. "
-        "Call the `generate_illustrations` tool exactly once — it reads state and "
-        "saves one PNG artifact per page. After it returns, write a short Korean "
-        "summary listing each page number and its saved artifact filename."
-    ),
-    tools=[generate_illustrations],
+parallel_illustrator = ParallelAgent(
+    name="parallel_illustrator",
+    description="Generates all 5 page illustrations concurrently.",
+    sub_agents=[_make_page_illustrator(i) for i in range(1, PAGE_COUNT + 1)],
 )
+
+
+# ---------- Root ----------
+
+def _root_after(callback_context: CallbackContext) -> Optional[types.Content]:
+    print("🎉 동화책 완성!", flush=True)
+    return None
 
 
 root_agent = SequentialAgent(
     name="story_book_maker",
-    description="Two-step pipeline: write a 5-page children's story, then illustrate each page.",
-    sub_agents=[story_writer, illustrator],
+    description="Two-step pipeline: write a 5-page children's story, then illustrate each page in parallel.",
+    sub_agents=[story_writer, parallel_illustrator],
+    after_agent_callback=_root_after,
 )

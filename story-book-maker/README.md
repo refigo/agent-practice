@@ -1,10 +1,21 @@
 # Story Book Maker
 
-Google ADK 두 에이전트로 만드는 5페이지 어린이 동화책 파이프라인.
+Google ADK Workflow Agents로 만드는 5페이지 어린이 동화책 파이프라인.
 
-- **story_writer** — 테마를 받아 5페이지 동화를 `StoryBook` 스키마에 맞춰 작성, `state["story"]`에 저장
-- **illustrator** — `state["story"]`를 읽어 페이지별로 이미지 생성, `page_<n>.png` Artifact로 저장
-- **root_agent** — 위 둘을 순서대로 실행하는 `SequentialAgent`
+```
+SequentialAgent (root)
+  ├─ story_writer            # LlmAgent + output_schema=StoryBook → state["story"]
+  └─ parallel_illustrator    # ParallelAgent
+       ├─ page_1_illustrator # LlmAgent + tool: generate_page_1_image
+       ├─ page_2_illustrator
+       ├─ page_3_illustrator
+       ├─ page_4_illustrator
+       └─ page_5_illustrator
+```
+
+- **SequentialAgent** — Writer → Parallel Illustrator 흐름 관리
+- **ParallelAgent** — 5개 페이지 일러스트를 동시에 생성
+- **Callbacks** — `before_agent_callback` / `after_agent_callback`으로 진행 상황 출력 (`스토리 작성 중...`, `이미지 N/5 생성 중...` 등)
 
 ## 모델
 
