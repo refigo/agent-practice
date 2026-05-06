@@ -1,10 +1,7 @@
 # Language Feedback Echo Loop — Design Draft
 
 > **Working title (가제):** *Language Feedback Echo Loop*. Final name TBD — see `NAMING.md`.
-
 > **Status:** v0 draft. Open questions marked with `❓`.
-> **Course context:** Nomad Coder AI Agent Challenge — Day 30 (Education theme, LangGraph).
-> Grows into a Demo Day project across subsequent weeks.
 
 ## 1. Problem
 
@@ -22,7 +19,7 @@ Input loop is closed. **Output loop is not.** Mistakes are logged but never re-e
 
 Spoken execution + scoring is **explicitly out of scope** for this agent — that becomes a separate downstream agent (auth / record / STT / compare). This agent ends at "drill content emitted as markdown + JSON."
 
-## 2. Agent Spec (Day 30 Step 1)
+## 2. Agent Spec
 
 ### Name
 **Language Feedback Echo Loop** *(working title — see `NAMING.md` for candidate list and ranking)*.
@@ -74,7 +71,7 @@ Convert daily English-feedback logs (real corrections from real Claude sessions)
                 └──────────────────────┘
 ```
 
-5 nodes; assignment requires ≥ 2. For Day 30 submission, a working v0 with at least `collect_feedback → generate_drill_cards → format_and_emit` is enough; the curate/select layer can ship as a single LLM call first and split out later if quality demands.
+5 nodes total. v0 ships the minimal working slice — `collect_feedback → generate_drill_cards → format_and_emit` — with `curate_and_cluster` and `select_and_rank` initially inlined into the LLM prompt. They split out into dedicated nodes once selection quality demands per-stage observability.
 
 ## 3. State (TypedDict)
 
@@ -105,18 +102,16 @@ class TrainerState(TypedDict):
     output_paths: dict[str, str]   # {"md": "...", "json": "..."}
 ```
 
-## 4. Day 30 Deliverable Plan
+## 4. v0 Build Plan
 
-Per the assignment:
-- **Step 1 (design)** — this document. Will be embedded in the Jupyter notebook as the opening markdown cell.
-- **Step 2 (build)** — `notebook.ipynb` with:
-  1. Setup cell (install langgraph + dependencies via uv, env loading)
-  2. State definition cell (TypedDicts above)
-  3. Node implementations — start with **2 working nodes**: `collect_feedback` (deterministic file parser) and `generate_drill_cards` (LLM call). Curate/select inlined into the LLM prompt for v0.
+- **Design** — this document. Mirrored as the opening markdown cell of the notebook.
+- **Implementation** — `notebook.ipynb`:
+  1. Setup cell (langgraph + dependencies via uv, env loading)
+  2. State definitions (TypedDicts above)
+  3. Node implementations — `collect_feedback` (deterministic parser), `generate_drill_cards` (LLM, structured output), `format_and_emit` (markdown + JSON writer)
   4. Graph wiring (`StateGraph`, edges, compile)
-  5. Smoke run on a sample feedback file (use `~/workspaces/english-feedbacks/feedbacks/2026-04-07.md`)
+  5. Smoke run on a sample feedback file (`~/workspaces/english-feedbacks/feedbacks/2026-04-07.md`)
   6. Print emitted deck.md to verify output shape end-to-end
-- **Submission:** GitHub commit link.
 
 ## 5. Resolved Decisions
 
@@ -128,7 +123,7 @@ Per the assignment:
 - ❓ **Deck size.** N = 10? 15? Or capped by estimated minutes-to-drill rather than count?
 - ❓ **Pattern tags.** Closed taxonomy (article / tense / preposition / word-choice / phrasal / register / other)? Or free-form LLM-generated tags? Closed is more useful for tracking progress over weeks.
 - ❓ **Multi-day rollup.** v0 = single day. v1 → "give me the week's deck, deduped against last week"? (Probably yes — defer.)
-- ❓ **Run trigger.** Manual `uv run` for now. Later: cron/launchd nightly? Slack/discord delivery? Not for Day 30.
+- ❓ **Run trigger.** Manual `uv run` for now. Later: cron/launchd nightly? Slack/Discord delivery? Out of v0 scope.
 - ❓ **Naming.** Selecting from candidate list (see naming doc).
 
 ## 7. Non-Goals (v0)
@@ -139,13 +134,13 @@ Per the assignment:
 - Cross-machine sync mechanism (assumed solved upstream).
 - Long-term progress tracking / SRS scheduling. (Strong v2 candidate.)
 
-## 8. Roadmap Sketch (post-Day 30)
+## 8. Roadmap Sketch
 
-| Week | Add |
-|------|-----|
-| Day 30 | LangGraph skeleton, 2+ working nodes, single-day deck |
-| +1 wk  | Pattern-tag taxonomy, multi-day rollup, dedupe vs. recent decks |
-| +2 wk  | Spaced repetition: per-card mastery state, "due today" queue |
-| +3 wk  | TTS hook (downstream agent contract via deck.json) |
-| +4 wk  | Speaking-execution agent: record → STT → similarity score |
-| Demo   | End-to-end: yesterday's mistakes → tonight's spoken reps with score |
+| Stage | Add |
+|-------|-----|
+| v0     | LangGraph skeleton, 3 working nodes, single-day deck |
+| v0.1   | Pattern-tag taxonomy refinement, multi-day rollup, dedupe vs. recent decks |
+| v0.2   | Spaced repetition: per-card mastery state, "due today" queue |
+| v0.3   | TTS hook (downstream agent contract via deck.json) |
+| v0.4   | Speaking-execution agent: record → STT → similarity score |
+| v1     | End-to-end loop: yesterday's mistakes → tonight's spoken reps with score |
