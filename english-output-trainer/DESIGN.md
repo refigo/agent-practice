@@ -1,4 +1,6 @@
-# English Output Trainer — Design Draft
+# Language Feedback Echo Loop — Design Draft
+
+> **Working title (가제):** *Language Feedback Echo Loop*. Final name TBD — see `NAMING.md`.
 
 > **Status:** v0 draft. Open questions marked with `❓`.
 > **Course context:** Nomad Coder AI Agent Challenge — Day 30 (Education theme, LangGraph).
@@ -23,7 +25,7 @@ Spoken execution + scoring is **explicitly out of scope** for this agent — tha
 ## 2. Agent Spec (Day 30 Step 1)
 
 ### Name
-**English Output Trainer** (working title — alternatives: *Echo Loop*, *SpeakBack*, *RepDeck*).
+**Language Feedback Echo Loop** *(working title — see `NAMING.md` for candidate list and ranking)*.
 
 ### Purpose
 Convert daily English-feedback logs (real corrections from real Claude sessions) into a personalized speaking-drill deck targeting the user's actual recurring mistakes.

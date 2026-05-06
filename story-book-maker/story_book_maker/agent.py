@@ -93,7 +93,7 @@ def _make_page_illustrator(page_num: int) -> LlmAgent:
             f"{page['visual']}. No text in image."
         )
         client = genai.Client()
-        response = client.models.generate_content(
+        response = await client.aio.models.generate_content(
             model=IMAGE_MODEL,
             contents=prompt,
             config=types.GenerateContentConfig(
