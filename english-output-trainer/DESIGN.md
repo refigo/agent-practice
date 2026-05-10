@@ -71,7 +71,20 @@ Convert daily English-feedback logs (real corrections from real Claude sessions)
                 └──────────────────────┘
 ```
 
-5 nodes total. v0 ships the minimal working slice — `collect_feedback → generate_drill_cards → format_and_emit` — with `curate_and_cluster` and `select_and_rank` initially inlined into the LLM prompt. They split out into dedicated nodes once selection quality demands per-stage observability.
+v0 ships **5 working nodes** plus a custom tool and a conditional edge:
+
+```
+                                            ┌── (raw_entries empty) ──► emit_empty_deck ──► END
+START ─► collect_feedback ──[conditional]───┤
+                                            └─► generate_drill_cards ─► enrich_with_glossary ─► format_and_emit ─► END
+```
+
+- **`collect_feedback`** — deterministic regex parser; drops entries with no correction.
+- **`generate_drill_cards`** — LLM with structured output. The `curate_and_cluster` and `select_and_rank` stages from the original design are inlined into this prompt; they will be split out once selection quality demands per-stage observability.
+- **`enrich_with_glossary`** — calls the `pattern_glossary_lookup` tool (custom LangChain `@tool`) for each card and attaches a `pattern_explanation` field.
+- **`format_and_emit`** — writes `decks/deck-YYYY-MM-DD.{md,json}`.
+- **`emit_empty_deck`** — fallback when no actionable feedback exists for the date.
+- **Conditional edge `has_content`** — routes from `collect_feedback` based on whether `raw_entries` is empty.
 
 ## 3. State (TypedDict)
 
@@ -92,6 +105,7 @@ class DrillCard(TypedDict):
     mistake_note_en: str         # brief English note on what was wrong
     pattern_tag: str             # error category (closed taxonomy, see §5)
     paraphrases_en: list[str]    # 1-2 alternative natural phrasings
+    pattern_explanation: str     # added by enrich_with_glossary via the tool
 
 class TrainerState(TypedDict):
     target_date: str               # "YYYY-MM-DD"
