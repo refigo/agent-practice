@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 .ipynb_checkpoints/
 decks/
+.streamlit/secrets.toml

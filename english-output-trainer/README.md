@@ -63,37 +63,61 @@ class TrainerState(TypedDict, total=False):
 
 ## Run
 
+### Try the live demo
+
+The Streamlit Cloud build ships with a built-in sample feedback log — no upload needed. Just hit **Generate today's deck** to see the orchestrator-workers pipeline produce a deck end-to-end.
+
+> *Deployed URL: **TBD** (fill in after `share.streamlit.io` deploy)*
+
+### Run locally
+
 ```bash
 cp .env.example .env
 # fill in OPENAI_API_KEY (https://platform.openai.com/api-keys)
 
 uv sync
-```
-
-### Streamlit chat UI (primary)
-
-```bash
 uv run streamlit run app.py
 ```
 
-- Sidebar: pick the target date + feedback directory, click **Generate today's deck**.
-- The agent runs end-to-end (parallel workers fan out across the day's entries) and renders each card in an expander, with download buttons for `deck.md` and `deck.json`.
-- Use the chat input to ask a per-card follow-up (e.g., `Card 2: give me 3 more examples` — the tutor reply is English-only by design).
+The sidebar exposes three feedback-source modes:
+
+1. **Paste / edit text** *(default — works anywhere, includes a sample to load)*
+2. **Upload .md file** — drag in any `english-feedback` daily log
+3. **Local directory (dev only)** — point at `~/workspaces/english-feedbacks/feedbacks` when running locally with the companion skill installed
+
+Each card renders in an expander; download buttons emit `deck.md` and `deck.json`. The chat input accepts per-card follow-ups (e.g., `Card 2: give me 3 more examples` — replies are English-only by design).
+
+### Deploy on Streamlit Cloud
+
+1. Push this repo to GitHub.
+2. Visit [share.streamlit.io](https://share.streamlit.io/), click **New app**, point it at this repo with `english-output-trainer/app.py` as the entrypoint.
+3. Under *App settings → Secrets*, paste:
+   ```toml
+   OPENAI_API_KEY = "sk-..."
+   ```
+4. Deploy. The app reads `OPENAI_API_KEY` from `st.secrets` and writes deck artifacts to ephemeral disk (downloadable via the in-app buttons).
 
 ### Headless / notebook run
 
 ```bash
+# file-based (local)
 uv run python -c "from agent import run_for_date; print(run_for_date('2026-04-07', ['~/workspaces/english-feedbacks/feedbacks/2026-04-07.md']))"
-# or
+
+# text-based (works anywhere — same path the Streamlit UI uses)
+uv run python -c "from agent import run_for_text; print(run_for_text('2026-05-18', open('sample.md').read()))"
+
+# or full walk-through
 uv run jupyter nbconvert --to notebook --execute notebook.ipynb --output notebook.ipynb
 ```
 
-The smoke runs parse `~/workspaces/english-feedbacks/feedbacks/2026-04-07.md` and write `decks/deck-2026-04-07.{md,json}`. An empty-file path exercises the `emit_empty_deck` conditional branch.
+The smoke runs write `decks/deck-YYYY-MM-DD.{md,json}`. An empty input exercises the `emit_empty_deck` conditional branch.
 
 ## Documents & files
 
-- `agent.py` — LangGraph agent module (state, nodes, tool, graph builder, Q&A helper)
-- `app.py` — Streamlit chat UI (imports `agent`)
+- `agent.py` — LangGraph agent module (state, nodes, tool, graph builder, Q&A helper, `run_for_date` / `run_for_text`)
+- `app.py` — Streamlit chat UI (imports `agent`; supports paste / upload / local-dir modes; cloud-secrets aware)
+- `requirements.txt` — pinned for Streamlit Cloud
+- `.streamlit/secrets.toml.example` — secrets template (real `secrets.toml` is gitignored)
 - `notebook.ipynb` — implementation walkthrough + smoke runs
 - `DESIGN.md` — full design rationale, open questions, roadmap
 

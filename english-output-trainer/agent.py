@@ -60,6 +60,7 @@ class DrillCard(TypedDict, total=False):
 class TrainerState(TypedDict, total=False):
     target_date: str
     feedback_paths: list[str]
+    feedback_text: str  # inline markdown content (alternative to feedback_paths)
     raw_entries: list[FeedbackEntry]
     selected_entries: list[FeedbackEntry]
     # Workers append in parallel — reducer concatenates worker outputs.
@@ -81,8 +82,8 @@ NOTES_RE = re.compile(r"^\*\*Notes:\*\*\s*(.+?)$", re.MULTILINE)
 NO_CORRECTION_RE = re.compile(r"\*\*\(No corrections needed\.\)\*\*")
 
 
-def parse_feedback_file(path: Path) -> list[FeedbackEntry]:
-    text = path.read_text(encoding="utf-8")
+def parse_feedback_text(text: str) -> list[FeedbackEntry]:
+    """Parse feedback markdown content directly (no file IO)."""
     entries: list[FeedbackEntry] = []
     for m in ENTRY_BLOCK_RE.finditer(text):
         ts = m.group(1).strip()
@@ -106,13 +107,19 @@ def parse_feedback_file(path: Path) -> list[FeedbackEntry]:
     return entries
 
 
+def parse_feedback_file(path: Path) -> list[FeedbackEntry]:
+    return parse_feedback_text(path.read_text(encoding="utf-8"))
+
+
 # ----------------------------------------------------------------------------
 # Node: collect_feedback
 # ----------------------------------------------------------------------------
 
 def collect_feedback(state: TrainerState) -> dict:
     entries: list[FeedbackEntry] = []
-    for p in state["feedback_paths"]:
+    if state.get("feedback_text"):
+        entries.extend(parse_feedback_text(state["feedback_text"]))
+    for p in state.get("feedback_paths") or []:
         path = Path(p).expanduser()
         if path.is_file():
             entries.extend(parse_feedback_file(path))
@@ -333,6 +340,22 @@ def run_for_date(target_date: str, feedback_paths: list[str], *, deck_cap: int =
     return app.invoke({
         "target_date": target_date,
         "feedback_paths": feedback_paths,
+        "feedback_text": "",
+        "raw_entries": [],
+        "selected_entries": [],
+        "raw_cards": [],
+        "drill_cards": [],
+        "output_paths": {},
+        "deck_cap": deck_cap,
+    })
+
+
+def run_for_text(target_date: str, feedback_text: str, *, deck_cap: int = 10) -> dict:
+    """Convenience: run the agent over inline markdown feedback text (no file IO)."""
+    return app.invoke({
+        "target_date": target_date,
+        "feedback_paths": [],
+        "feedback_text": feedback_text,
         "raw_entries": [],
         "selected_entries": [],
         "raw_cards": [],
